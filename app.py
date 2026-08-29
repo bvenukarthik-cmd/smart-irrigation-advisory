@@ -248,90 +248,141 @@ def fetch_weather_data(lat, lon):
             "Temp_Max": [32.0]
         })
 
-# --- 5. SIDEBAR: PARAMETERS & FIELD CONTROLS ---
+# --- 5. SIDEBAR: PARAMETERS & HARDWARE-INDEPENDENT CONTROLS ---
 with st.sidebar:
     st.markdown("### 📍 Farm Profile")
     selected_state = st.selectbox(
         "State (राज्य)", 
         list(INDIAN_DISTRICTS.keys()),
-        help="Select the geographic state of your farm.",
-        key="sb_state_select"
+        help="Select the geographic state of your farm."
     )
     selected_district = st.selectbox(
         "District / Tehsil (ज़िला)", 
         list(INDIAN_DISTRICTS[selected_state].keys()),
-        help="Hyper-local weather and evapotranspiration data are fetched for this location.",
-        key="sb_district_select"
+        help="Hyper-local weather and evapotranspiration data are fetched for this location."
     )
     lat, lon = INDIAN_DISTRICTS[selected_state][selected_district]
     
+    # Pre-fetch today's weather to enable dynamic virtual water-balancing
+    weather_df = fetch_weather_data(lat, lon)
+    today_weather = weather_df.iloc[0]
+    et0_today = float(today_weather["ET0_mm"]) if today_weather["ET0_mm"] is not None else 4.5
+    rain_today = float(today_weather["Rain_mm"]) if today_weather["Rain_mm"] is not None else 0.0
+
     st.markdown("---")
     st.markdown("### 🌱 Crop & Soil Configuration")
     crop = st.selectbox(
         "Crop Type (फसल)", 
         list(CROPS_KC.keys()),
-        help="Select your cultivated crop to determine root depth and crop coefficient (Kc).",
-        key="sb_crop_select"
+        help="Select your cultivated crop to determine root depth and crop coefficient (Kc)."
     )
     stage = st.selectbox(
         "Growth Stage (अवस्था)", 
         ["Initial (प्रारंभिक)", "Mid (मध्य वृद्धि)", "End (परिपक्वता)"],
-        help="Crop water demand peaks during the Mid-season reproductive phase.",
-        key="sb_stage_select"
+        help="Crop water demand peaks during the Mid-season reproductive phase."
     )
     stage_key = "Initial" if "Initial" in stage else ("Mid" if "Mid" in stage else "End")
     
+    kc_val = CROPS_KC[crop][stage_key]
+    etc_today = et0_today * kc_val
+    root_depth_mm = CROPS_KC[crop]["root_depth_m"] * 1000
+
     soil = st.selectbox(
         "Soil Texture (मिट्टी)", 
         list(SOIL_TYPES.keys()),
-        help="Soil texture determines moisture retention limits (Field Capacity and Wilting Point).",
-        key="sb_soil_select"
+        help="Soil texture determines moisture retention limits (Field Capacity and Wilting Point)."
     )
-    st.caption(f"💡 *{SOIL_TYPES[soil]['desc']}*")
+    soil_info = SOIL_TYPES[soil]
+    fc = soil_info["field_capacity"]
+    wp = soil_info["wilting_point"]
+    mad_threshold = wp + 0.5 * (fc - wp)
+    st.caption(f"💡 *{soil_info['desc']}*")
+
+    # -------------------------------------------------------------
+    # DYNAMIC SOIL MOISTURE INPUT HUB (SENSORLESS & PHYSICAL MODES)
+    # -------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 💧 Soil Moisture Estimation Mode")
+    moisture_mode = st.radio(
+        "Estimate soil moisture without sensors:",
+        (
+            "📅 Days Since Last Watering (Auto-Balance)",
+            "✋ Soil Touch & Appearance (ICAR Test)",
+            "📊 Manual / Sensor Value (%)"
+        ),
+        help="Choose the simplest method based on what information you have available."
+    )
+
+    if moisture_mode == "📅 Days Since Last Watering (Auto-Balance)":
+        days_ago = st.slider(
+            "Days since last irrigation or heavy rain:",
+            min_value=0,
+            max_value=10,
+            value=3,
+            help="0 = watered today (at Field Capacity). The system accounts for daily ETc water loss."
+        )
+        
+        # Virtual water balance depletion calculation (FAO-56 equation)
+        accumulated_loss_mm = days_ago * etc_today
+        moisture_depletion_pct = (accumulated_loss_mm / root_depth_mm) * 100.0
+        current_soil_moisture = max(wp, round(fc - moisture_depletion_pct, 1))
+        
+        st.info(
+            f"💡 **Estimated Soil Moisture:** `{current_soil_moisture}%`\n\n"
+            f"*(Depletion: {days_ago} days × {etc_today:.1f} mm/day crop demand)*"
+        )
+
+    elif moisture_mode == "✋ Soil Touch & Appearance (ICAR Test)":
+        feel_choice = st.selectbox(
+            "Select field soil condition by touch/feel:",
+            [
+                "🟢 Wet & Dark (Forms pliable ball, leaves wet outline on fingers)",
+                "🟡 Moderately Moist (Forms ball under pressure, crumbles easily)",
+                "🔴 Dry & Hard (Dusty, cracked surface, cannot form a ball)"
+            ],
+            index=1,
+            help="Standard ICAR & USDA field soil test methodology."
+        )
+        
+        if "Wet" in feel_choice:
+            current_soil_moisture = round(fc * 0.95, 1)
+        elif "Moderate" in feel_choice:
+            current_soil_moisture = round((fc + wp) / 2.0, 1)
+        else:
+            current_soil_moisture = round(wp + (fc - wp) * 0.15, 1)
+            
+        st.info(f"💡 **Estimated Soil Moisture:** `{current_soil_moisture}%`")
+
+    else:
+        # Fallback manual slider / physical capacitance probe input
+        current_soil_moisture = st.slider(
+            "Current Soil Moisture (% Vol):",
+            min_value=float(round(wp * 0.7, 1)),
+            max_value=float(round(fc * 1.2, 1)),
+            value=float(round((fc + wp) / 2.0, 1)),
+            step=0.5,
+            help="Volumetric moisture content from probe sensor or lab test."
+        )
 
     st.markdown("---")
     st.markdown("### ⚙️ Hydraulic Delivery Setup")
     method = st.selectbox(
         "Irrigation Method (सिंचाई प्रकार)",
         list(IRRIGATION_METHODS.keys()),
-        help="System efficiency directly determines how much extra water must be pumped.",
-        key="sb_method_select"
+        help="System efficiency directly determines how much extra water must be pumped."
     )
     field_area_acres = st.number_input(
         "Field Area (एकड़)", 
         min_value=0.1, value=1.0, step=0.1,
-        help="Total cultivated acreage (1 Acre = 4,046.86 m²).",
-        key="sb_area_input"
-    )
-    current_soil_moisture = st.slider(
-        "Current Soil Moisture (% Vol)", 
-        min_value=5.0, max_value=50.0, value=18.0,
-        help="Volumetric moisture content from your root-zone probe sensor.",
-        key="sb_moisture_slider"
+        help="Total cultivated acreage (1 Acre = 4,046.86 m²)."
     )
     pump_flow_rate = st.number_input(
         "Pump Flow Rate (Liters/Hour)", 
         min_value=500, value=5000, step=500,
-        help="Water discharge capacity of your motor/pump setup.",
-        key="sb_flow_rate_input"
+        help="Water discharge capacity of your motor/pump setup."
     )
 
-# --- 6. CORE FAO-56 SCIENTIFIC ENGINE ---
-weather_df = fetch_weather_data(lat, lon)
-today_weather = weather_df.iloc[0]
-
-et0_today = today_weather["ET0_mm"] if today_weather["ET0_mm"] is not None else 4.5
-rain_today = today_weather["Rain_mm"] if today_weather["Rain_mm"] is not None else 0.0
-kc_val = CROPS_KC[crop][stage_key]
-etc_today = et0_today * kc_val
-
-soil_info = SOIL_TYPES[soil]
-fc = soil_info["field_capacity"]
-wp = soil_info["wilting_point"]
-mad_threshold = wp + 0.5 * (fc - wp)
-
-root_depth_mm = CROPS_KC[crop]["root_depth_m"] * 1000
-
+# --- 6. CORE FAO-56 SCIENTIFIC COMPUTATIONS ---
 if current_soil_moisture < fc:
     moisture_deficit_mm = ((fc - current_soil_moisture) / 100.0) * root_depth_mm
 else:
@@ -421,7 +472,6 @@ tab_advisory, tab_analytics, tab_dispatch, tab_forecast = st.tabs([
 # --- TAB 1: ACTION PLAN & SENSOR GAUGE ---
 with tab_advisory:
     col_left, col_right = st.columns([1.3, 1])
-    
     clean_crop = crop.split('(')[0].strip()
     
     if current_soil_moisture > fc:
@@ -492,7 +542,6 @@ with tab_advisory:
             """)
 
     with col_right:
-        # High-definition Plotly Gauge with explicit unique key
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=current_soil_moisture,
@@ -518,7 +567,7 @@ with tab_advisory:
             }
         ))
         fig_gauge.update_layout(height=260, margin=dict(l=20, r=20, t=30, b=10))
-        st.plotly_chart(fig_gauge, use_container_width=True, key="plotly_soil_moisture_gauge")
+        st.plotly_chart(fig_gauge, use_container_width=True)
         st.caption("<div style='text-align: center; color: #64748b;'>🔴 Wilting Point | 🟡 Depletion Alert | 🟢 Optimal | 🔵 Field Capacity</div>", unsafe_allow_html=True)
 
 # --- TAB 2: SAVINGS & CARBON ANALYTICS ---
@@ -529,11 +578,11 @@ with tab_analytics:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        pump_hp = st.number_input("Pump Power (HP)", min_value=1.0, value=5.0, step=0.5, help="Motor power in horsepower.", key="tab2_pump_hp_input")
+        pump_hp = st.number_input("Pump Power (HP)", min_value=1.0, value=5.0, step=0.5, help="Motor power in horsepower.")
     with c2:
-        tariff_per_kwh = st.number_input("Electricity Tariff (₹ / kWh)", min_value=0.0, value=6.50, step=0.5, key="tab2_tariff_input")
+        tariff_per_kwh = st.number_input("Electricity Tariff (₹ / kWh)", min_value=0.0, value=6.50, step=0.5)
     with c3:
-        season_cycles = st.slider("Irrigation Events / Season", min_value=5, max_value=40, value=15, key="tab2_season_slider")
+        season_cycles = st.slider("Irrigation Events / Season", min_value=5, max_value=40, value=15)
 
     pump_kw = pump_hp * 0.746
     precision_kwh_event = pump_runtime_hours * pump_kw
@@ -558,7 +607,7 @@ with tab_analytics:
 
     st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
-    # Clean comparative bar chart with explicit unique key
+    # Comparative bar chart
     comp_df = pd.DataFrame({
         "Metric": ["Water Volume (kL)", "Pump Runtime (Hrs)", "Energy (kWh)", "Cost per Event (₹)"],
         "Conventional Flood (60mm)": [conventional_water_liters / 1000, conventional_pump_hours, conventional_kwh_event, conventional_kwh_event * tariff_per_kwh],
@@ -570,19 +619,13 @@ with tab_analytics:
         x=comp_df["Metric"], 
         y=comp_df["Conventional Flood (60mm)"], 
         name="Conventional Flood (60mm)", 
-        marker=dict(
-            color="#ef4444",
-            line=dict(color="#b91c1c", width=1.5)
-        )
+        marker_color="#ef4444"
     ))
     fig_comp.add_trace(go.Bar(
         x=comp_df["Metric"], 
         y=comp_df["AquaAdvice Precision"], 
         name="AquaAdvice Precision", 
-        marker=dict(
-            color="#0d9488",
-            line=dict(color="#0f766e", width=1.5)
-        )
+        marker_color="#0d9488"
     ))
     fig_comp.update_layout(
         barmode="group",
@@ -593,7 +636,7 @@ with tab_analytics:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     fig_comp.update_yaxes(gridcolor="#f1f5f9")
-    st.plotly_chart(fig_comp, use_container_width=True, key="plotly_savings_comparison_chart")
+    st.plotly_chart(fig_comp, use_container_width=True)
 
 # --- TAB 3: DISPATCH GATEWAY ---
 with tab_dispatch:
@@ -602,11 +645,11 @@ with tab_dispatch:
     with d_col1:
         f1, f2 = st.columns(2)
         with f1:
-            farmer_name = st.text_input("Farmer Name (किसान का नाम)", value="Ramesh Patil", key="dispatch_farmer_name")
-            farmer_phone = st.text_input("Mobile Number", value="+91 98765 43210", key="dispatch_farmer_phone")
+            farmer_name = st.text_input("Farmer Name (किसान का नाम)", value="Ramesh Patil")
+            farmer_phone = st.text_input("Mobile Number", value="+91 98765 43210")
         with f2:
-            channel = st.selectbox("Dispatch Channel", ["WhatsApp Advisory", "SMS Alert"], key="dispatch_channel_select")
-            lang = st.radio("Advisory Language (भाषा)", ["English", "Hindi"], horizontal=True, key="dispatch_lang_select")
+            channel = st.selectbox("Dispatch Channel", ["WhatsApp Advisory", "SMS Alert"])
+            lang = st.radio("Advisory Language (भाषा)", ["English", "Hindi"], horizontal=True)
 
         selected_body = action_text_hi if lang == "Hindi" else action_text_en
         timestamp_str = datetime.now().strftime("%d-%b-%Y, %I:%M %p")
@@ -626,7 +669,7 @@ with tab_dispatch:
 
         btn1, btn2 = st.columns(2)
         with btn1:
-            if st.button("🚀 Trigger Instant Alert (Simulated)", use_container_width=True, type="primary", key="btn_simulated_dispatch"):
+            if st.button("🚀 Trigger Instant Alert (Simulated)", use_container_width=True, type="primary"):
                 with st.spinner(f"Connecting to {channel} Gateway..."):
                     time.sleep(1.0)
                 st.session_state.alert_logs.insert(0, {
@@ -645,7 +688,7 @@ with tab_dispatch:
         st.markdown("**Real-Time Dispatch Audit Log**")
         if st.session_state.alert_logs:
             st.dataframe(pd.DataFrame(st.session_state.alert_logs), hide_index=True, use_container_width=True)
-            if st.button("Clear History", use_container_width=True, key="btn_clear_dispatch_logs"):
+            if st.button("Clear History", use_container_width=True):
                 st.session_state.alert_logs = []
                 st.rerun()
         else:
@@ -678,5 +721,3 @@ with tab_forecast:
             use_container_width=True
         )
         st.caption("Positive balance = rain surplus; negative balance = soil moisture depletion.")
-  
-  
