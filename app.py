@@ -549,7 +549,7 @@ with tab_analytics:
 
     st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
-    # Clean comparative bar chart
+   # Clean comparative bar chart
     comp_df = pd.DataFrame({
         "Metric": ["Water Volume (kL)", "Pump Runtime (Hrs)", "Energy (kWh)", "Cost per Event (₹)"],
         "Conventional Flood (60mm)": [conventional_water_liters / 1000, conventional_pump_hours, conventional_kwh_event, conventional_kwh_event * tariff_per_kwh],
@@ -561,16 +561,30 @@ with tab_analytics:
         x=comp_df["Metric"], 
         y=comp_df["Conventional Flood (60mm)"], 
         name="Conventional Flood (60mm)", 
-        marker_color="#ef4444",
-        borderhair=dict(color="#b91c1c", width=1)
+        marker=dict(
+            color="#ef4444",
+            line=dict(color="#b91c1c", width=1.5)
+        )
     ))
     fig_comp.add_trace(go.Bar(
         x=comp_df["Metric"], 
         y=comp_df["AquaAdvice Precision"], 
         name="AquaAdvice Precision", 
-        marker_color="#0d9488",
-        borderhair=dict(color="#0f766e", width=1)
+        marker=dict(
+            color="#0d9488",
+            line=dict(color="#0f766e", width=1.5)
+        )
     ))
+    fig_comp.update_layout(
+        barmode="group",
+        height=320,
+        font=dict(family="Plus Jakarta Sans"),
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=20, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    fig_comp.update_yaxes(gridcolor="#f1f5f9")
+    st.plotly_chart(fig_comp, use_container_width=True)
     fig_comp.update_layout(
         barmode="group",
         height=320,
