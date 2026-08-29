@@ -8,8 +8,8 @@ import urllib.parse
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Krishi Jal - Smart Irrigation Advisory",
-    page_icon="🌾",
+    page_title="Aqua Advice - Smart Irrigation Advisory",
+    page_icon="💧",
     layout="wide"
 )
 
@@ -136,7 +136,7 @@ def fetch_weather_data(lat, lon):
         })
 
 # --- TITLE & SUBHEADER ---
-st.title("🌾 Krishi Jal: Field-Level Smart Irrigation Advisory")
+st.title("💧 Aqua Advice: Field-Level Smart Irrigation System")
 st.caption("Precision agricultural advisory powered by FAO-56 Penman-Monteith agro-meteorological modeling.")
 
 # --- SIDEBAR: FARMER FRIENDLY LOCATION & FIELD INPUTS ---
@@ -271,7 +271,7 @@ with d_col1:
     clean_crop = crop.split('(')[0].strip()
     
     message_payload = (
-        f"🌾 *KRISHI JAL ADVISORY* 🌾\n"
+        f"💧 *AQUA ADVICE ALERT* 💧\n"
         f"👤 *Farmer:* {farmer_name}\n"
         f"📍 *Location:* {selected_district}, {selected_state}\n"
         f"🌱 *Crop:* {clean_crop} ({stage_key} Stage)\n"
@@ -345,11 +345,13 @@ s4.metric("Est. Season Savings", f"₹ {cost_saved_season:,.2f}")
 comp_df = pd.DataFrame({
     "Metric": ["Water (kL)", "Pump Time (Hrs)", "Energy (kWh)", "Cost (₹)"],
     "Conventional Flood": [conventional_water_liters / 1000, conventional_pump_hours, conventional_kwh_event, conventional_kwh_event * tariff_per_kwh],
-    "Smart Advisory": [water_volume_liters / 1000, pump_runtime_hours, precision_kwh_event, precision_kwh_event * tariff_per_kwh]
+    "Aqua Advice": [water_volume_liters / 1000, pump_runtime_hours, precision_kwh_event, precision_kwh_event * tariff_per_kwh]
 })
 
 fig_comp = go.Figure()
 fig_comp.add_trace(go.Bar(x=comp_df["Metric"], y=comp_df["Conventional Flood"], name="Conventional Flood", marker_color="#EF553B"))
-fig_comp.add_trace(go.Bar(x=comp_df["Metric"], y=comp_df["Smart Advisory"], name="Smart Precision", marker_color="#00CC96"))
+fig_comp.add_trace(go.Bar(x=comp_df["Metric"], y=comp_df["Aqua Advice"], name="Aqua Advice", marker_color="#00CC96"))
 fig_comp.update_layout(barmode="group", height=300, margin=dict(l=20, r=20, t=20, b=20))
 st.plotly_chart(fig_comp, use_container_width=True)
+
+
